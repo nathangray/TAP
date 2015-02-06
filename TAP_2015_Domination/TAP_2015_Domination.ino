@@ -43,6 +43,9 @@ team to the set time for the game wins.
 #define TEAM_COUNT 2
 #define BOUNCE_TIME 50
 #define MAX_SCORE 2*60*60 // Max 2 hour
+// Whoever is not in control is dimmed
+#define NON_SEGMENT_BRIGHTNESS 4 // For 7 seg, 0-15
+#define NON_LED_BRIGHTNESS 60    // For LEDs, 0-255
 
 // System states
 #define STATE_SET  0
@@ -87,7 +90,7 @@ Team* owner = NULL;              // Who's owning
 int led_step = 0;
 int center = 0;
 #define FADE_STEPS 16
-uint8_t fade[] = {128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
+uint8_t fade[] = {254,245,219,179,131,83,41,13,2,11,37,77,128,173,215,243};
 //{128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
 
 void setup() {
@@ -105,7 +108,9 @@ void setup() {
     // Set up 7 segment displays
     teams[i].display.begin(teams[i].display_address);
     teams[i].display.drawColon(true);
+    show_time(teams[i].display,0);
   }
+  delay(100);
   
   // More LED
   for(int j = 0; j < LED_COUNT; j++)
@@ -179,7 +184,7 @@ void set() {
     {
       target_score += 60;
     }
-    constrain(target_score, 60, MAX_SCORE);
+    target_score = constrain(target_score, 60, MAX_SCORE);
     // Set displays directly
     for(byte i = 0; i < TEAM_COUNT; i++)
     {
@@ -215,10 +220,17 @@ void play() {
         // Dim
         if(owner != NULL)
         {
-          fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, 100));
+          fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, NON_LED_BRIGHTNESS));
+          owner->display.setBrightness(NON_SEGMENT_BRIGHTNESS);
+          owner->display.writeDisplay();
         }
+        
         owner =& teams[i];
         fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, 255));
+        owner->display.setBrightness(255);
+        owner->display.writeDisplay();
+        // Reset LED at the bottom to prevent wrong score showing
+        led_step = 0;
       }
     }
     
@@ -229,6 +241,11 @@ void play() {
         owner->score++;
         owner->top_led = (owner->score * LED_COUNT) / target_score;
         show_time(owner->display, owner->score);
+        int percent = owner->score * 100 / target_score;
+        if(percent > 90)
+        {
+          led_animate.interval(10);
+        }
         if(owner->score >= target_score)
         {
           state = STATE_WIN;
