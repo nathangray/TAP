@@ -20,6 +20,7 @@ team to the set time for the game wins.
 
 
 */
+
 // For interrupt based timing
 #include <Metro.h>
 
@@ -116,9 +117,6 @@ void setup() {
     FastLED.show();
     delay(25);
   }
-  
-  
-  Serial.println("Begin");
 }
 
 void loop() {
@@ -221,8 +219,6 @@ void play() {
         }
         owner =& teams[i];
         fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, 255));
-        
-        Serial.println();Serial.print("Owner: " );Serial.println(i == RED_TEAM ? "red" : "blue");
       }
     }
     
@@ -247,7 +243,6 @@ void play() {
  * Yay, someone won
  */
 void win() {
-  Serial.println("Win");
   for(byte i = 0; i < TEAM_COUNT; i++)
   {
     for(byte j = 0; j < LED_COUNT; j++)
@@ -262,7 +257,6 @@ void win() {
  * Nothing happening, look cool
  */
 void idle() {
-  Serial.println("idle");
 }
 
 /**
@@ -278,19 +272,15 @@ void show_time(Adafruit_7segment &disp, int number)
 }
 
 void ripple(struct Team *t) {
-  Serial.print(t->hue); Serial.print(" "); Serial.println(teams[BLUE_TEAM].hue);
   if(t->top_led < 3) return;
   for(byte i = 0; i < FADE_STEPS && i < t->top_led; i++)
   {
-    Serial.print(i); Serial.print(" -> "); Serial.print(wrap(t->top_led,i+led_step)); Serial.print("  ");
     t->leds[wrap(t->top_led,i+led_step)] = CHSV(t->hue, 255, fade[i]);
   }
   led_step = wrap(t->top_led,led_step + 1);
-  Serial.print("Top: "); Serial.print(t->top_led); Serial.print(" led_step: ");Serial.println(led_step);
 }
 int wrap(byte top_led, int step) {
   if(step < 0) return top_led + step;
   if(step > top_led -1) return step - top_led ;
-  if(step > LED_COUNT) return 0;
   return step;
 } // wrap()
