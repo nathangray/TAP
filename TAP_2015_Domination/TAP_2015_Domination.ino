@@ -75,7 +75,7 @@ Team teams[] = {
 };
 
 Metro game_timer = Metro(1000);
-Metro led_animate = Metro(100);
+Metro led_animate = Metro(50);
 
 // State variables
 byte state = STATE_SET;
@@ -90,7 +90,6 @@ uint8_t fade[] = {128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
 //{128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
 
 void setup() {
-  Serial.begin(9600);
   // Set up lights
   FastLED.addLeds<NEOPIXEL, RED_LED_PIN>(teams[RED_TEAM].leds, LED_COUNT);
   FastLED.addLeds<NEOPIXEL, BLUE_LED_PIN>(teams[BLUE_TEAM].leds, LED_COUNT);
@@ -148,13 +147,6 @@ void loop_checks()
       ripple(owner);
       owner->leds[owner->top_led] = CHSV(owner->hue, 255,255);
     }
-    else
-    {
-      for(byte i = 0; i < TEAM_COUNT; i++)
-      {
-        //ripple(&teams[i]);
-      }
-    }
     FastLED.show();
   }
 }
@@ -201,9 +193,7 @@ void set() {
 /**
  * Time to play
  */
-void play() {
-  Serial.println("Play");
-  
+void play() {  
   for(byte i = 0; i < TEAM_COUNT; i++)
   {
     teams[i].display.blinkRate(0);
@@ -289,14 +279,18 @@ void show_time(Adafruit_7segment &disp, int number)
 
 void ripple(struct Team *t) {
   Serial.print(t->hue); Serial.print(" "); Serial.println(teams[BLUE_TEAM].hue);
+  if(t->top_led < 3) return;
   for(byte i = 0; i < FADE_STEPS && i < t->top_led; i++)
   {
+    Serial.print(i); Serial.print(" -> "); Serial.print(wrap(t->top_led,i+led_step)); Serial.print("  ");
     t->leds[wrap(t->top_led,i+led_step)] = CHSV(t->hue, 255, fade[i]);
   }
   led_step = wrap(t->top_led,led_step + 1);
+  Serial.print("Top: "); Serial.print(t->top_led); Serial.print(" led_step: ");Serial.println(led_step);
 }
 int wrap(byte top_led, int step) {
   if(step < 0) return top_led + step;
-  if(step > top_led) return step - top_led;
+  if(step > top_led -1) return step - top_led ;
+  if(step > LED_COUNT) return 0;
   return step;
 } // wrap()
