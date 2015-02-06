@@ -38,10 +38,10 @@ team to the set time for the game wins.
 /*
  *System defines
  */
-#define LED_COUNT 60
+#define LED_COUNT 46
 #define TEAM_COUNT 2
 #define BOUNCE_TIME 50
-#define MAX_SCORE 60*60 // Max 1 hour
+#define MAX_SCORE 2*60*60 // Max 2 hour
 
 // System states
 #define STATE_SET  0
@@ -51,13 +51,14 @@ team to the set time for the game wins.
 
 #define RED_TEAM 0
 #define BLUE_TEAM 1
-// These can't be variables
+// These can't be variables due to FastPixel
 #define RED_LED_PIN 11
 #define BLUE_LED_PIN 13
 
 // Structure for teams
 struct Team {
   int score;
+  byte top_led;
   
   byte button_pin;
   byte led_pin;
@@ -69,8 +70,8 @@ struct Team {
 };
 
 Team teams[] = {
-  {0, 10, RED_LED_PIN, Bounce(), Adafruit_7segment(), 0x70, HUE_RED},
-  {0, 12, BLUE_LED_PIN, Bounce(), Adafruit_7segment(), 0x71, HUE_BLUE},
+  {0, 0, 10, RED_LED_PIN, Bounce(), Adafruit_7segment(), 0x70, HUE_RED},
+  {0, 0, 12, BLUE_LED_PIN, Bounce(), Adafruit_7segment(), 0x71, HUE_BLUE},
 };
 
 Metro game_timer = Metro(1000);
@@ -80,6 +81,13 @@ Metro led_animate = Metro(100);
 byte state = STATE_SET;
 int target_score = 5*60; // 5 minutes
 Team* owner = NULL;              // Who's owning
+
+// Light animation
+int led_step = 0;
+int center = 0;
+#define FADE_STEPS 16
+uint8_t fade[] = {128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
+//{128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
 
 void setup() {
   Serial.begin(9600);
@@ -97,12 +105,17 @@ void setup() {
     // Set up 7 segment displays
     teams[i].display.begin(teams[i].display_address);
     teams[i].display.drawColon(true);
-    
-    // More LED
-    for(int j = 0; j < LED_COUNT; j++)
+  }
+  
+  // More LED
+  for(int j = 0; j < LED_COUNT; j++)
+  {
+    for(byte i = 0; i < TEAM_COUNT; i++)
     {
-      teams[i].leds[j].setHue(teams[i].hue);
+      teams[i].leds[j] = CHSV(teams[i].hue, 255, 128);
     }
+    FastLED.show();
+    delay(25);
   }
   
   
@@ -129,10 +142,18 @@ void loop_checks()
   }
   if(led_animate.check())
   {
+    
     if(owner != NULL)
     {
-      int top_led = owner->score / target_score * LED_COUNT;
-      owner->leds[top_led] = CHSV(owner->hue, 255,255);
+      ripple(owner);
+      owner->leds[owner->top_led] = CHSV(owner->hue, 255,255);
+    }
+    else
+    {
+      for(byte i = 0; i < TEAM_COUNT; i++)
+      {
+        //ripple(&teams[i]);
+      }
     }
     FastLED.show();
   }
@@ -144,8 +165,10 @@ void loop_checks()
 void set() {
   // Start in set mode
   for(byte i = 0; i < TEAM_COUNT; i++)
+  {
     teams[i].display.blinkRate(2);
-  
+  }
+
   while (state == STATE_SET)
   {
     loop_checks();
@@ -185,6 +208,12 @@ void play() {
   {
     teams[i].display.blinkRate(0);
     show_time(teams[i].display, 0);
+    // More LED
+    for(int j = 0; j < LED_COUNT; j++)
+    {
+      teams[i].leds[j] = CRGB::Black;
+    }
+    FastLED.show();
   }
   
   while (state == STATE_PLAY)
@@ -195,7 +224,14 @@ void play() {
     {
       if(teams[i].bounce.fell())
       {
+        // Dim
+        if(owner != NULL)
+        {
+          fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, 100));
+        }
         owner =& teams[i];
+        fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, 255));
+        
         Serial.println();Serial.print("Owner: " );Serial.println(i == RED_TEAM ? "red" : "blue");
       }
     }
@@ -205,6 +241,7 @@ void play() {
       if(owner != NULL)
       {
         owner->score++;
+        owner->top_led = (owner->score * LED_COUNT) / target_score;
         show_time(owner->display, owner->score);
         if(owner->score >= target_score)
         {
@@ -225,7 +262,8 @@ void win() {
   {
     for(byte j = 0; j < LED_COUNT; j++)
     {
-      teams[i].leds[j].setHue(owner->hue);
+      teams[i].leds[j]= CHSV(owner->hue, 255,255);
+      FastLED.show();
     }
   }
 }
@@ -249,3 +287,16 @@ void show_time(Adafruit_7segment &disp, int number)
   disp.writeDisplay();
 }
 
+void ripple(struct Team *t) {
+  Serial.print(t->hue); Serial.print(" "); Serial.println(teams[BLUE_TEAM].hue);
+  for(byte i = 0; i < FADE_STEPS && i < t->top_led; i++)
+  {
+    t->leds[wrap(t->top_led,i+led_step)] = CHSV(t->hue, 255, fade[i]);
+  }
+  led_step = wrap(t->top_led,led_step + 1);
+}
+int wrap(byte top_led, int step) {
+  if(step < 0) return top_led + step;
+  if(step > top_led) return step - top_led;
+  return step;
+} // wrap()
