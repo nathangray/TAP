@@ -26,6 +26,7 @@ team to the set time for the game wins.
 
 // Using I2C ...
 #include <Wire.h>
+
 // ... To talk to the 7-Segment displays
 #include "Adafruit_LEDBackpack.h"
 #include "Adafruit_GFX.h"
@@ -36,16 +37,22 @@ team to the set time for the game wins.
 // For software debouncing button presses
 #include <Bounce2.h>
 
+// Store time
+#include <EEPROM.h>
+
 /*
  *System defines
  */
 #define LED_COUNT 46
 #define TEAM_COUNT 2
-#define BOUNCE_TIME 50
+#define BOUNCE_TIME 100
 #define MAX_SCORE 2*60*60 // Max 2 hour
 // Whoever is not in control is dimmed
 #define NON_SEGMENT_BRIGHTNESS 4 // For 7 seg, 0-15
 #define NON_LED_BRIGHTNESS 60    // For LEDs, 0-255
+
+#define ANIMATE_INTERVAL 50
+#define SCORE_ADDRESS 0
 
 // System states
 #define STATE_SET  0
@@ -79,10 +86,10 @@ Team teams[] = {
 };
 
 Metro game_timer = Metro(1000);
-Metro led_animate = Metro(50);
+Metro led_animate = Metro(ANIMATE_INTERVAL);
 
 // State variables
-byte state = STATE_SET;
+byte state = STATE_PLAY;
 int target_score = 5*60; // 5 minutes
 Team* owner = NULL;              // Who's owning
 
@@ -94,6 +101,13 @@ uint8_t fade[] = {254,245,219,179,131,83,41,13,2,11,37,77,128,173,215,243};
 //{128,173,215,243,254,245,219,179,131,83,41,13,2,11,37,77};
 
 void setup() {
+  // Load stored time
+  int read = EEPROM.read(SCORE_ADDRESS);
+  if(read != 255 && read != 0)
+  {
+    target_score = 60 * read;
+  }
+  
   // Set up lights
   FastLED.addLeds<NEOPIXEL, RED_LED_PIN>(teams[RED_TEAM].leds, LED_COUNT);
   FastLED.addLeds<NEOPIXEL, BLUE_LED_PIN>(teams[BLUE_TEAM].leds, LED_COUNT);
@@ -108,7 +122,7 @@ void setup() {
     // Set up 7 segment displays
     teams[i].display.begin(teams[i].display_address);
     teams[i].display.drawColon(true);
-    show_time(teams[i].display,0);
+    show_time(teams[i].display,target_score);
   }
   delay(100);
   
@@ -121,6 +135,12 @@ void setup() {
     }
     FastLED.show();
     delay(25);
+  }
+  
+  // Check for buttons down -> set mode
+  if(digitalRead(teams[BLUE_TEAM].button_pin) == LOW || digitalRead(teams[BLUE_TEAM].button_pin) == LOW)
+  {
+    state = STATE_SET;
   }
 }
 
@@ -176,11 +196,11 @@ void set() {
       return;
     }
       
-    if(teams[RED_TEAM].bounce.fell())
+    if(teams[RED_TEAM].bounce.fell() && digitalRead(teams[BLUE_TEAM].button_pin))
     {
       target_score -= 60;
     }
-    if(teams[BLUE_TEAM].bounce.fell())
+    if(teams[BLUE_TEAM].bounce.fell() && digitalRead(teams[RED_TEAM].button_pin))
     {
       target_score += 60;
     }
@@ -189,6 +209,13 @@ void set() {
     for(byte i = 0; i < TEAM_COUNT; i++)
     {
       show_time(teams[i].display, target_score);
+    }
+    
+    // Update EEPROM
+    int read = EEPROM.read(SCORE_ADDRESS);
+    if(read * 60 != target_score)
+    {
+      EEPROM.write(SCORE_ADDRESS, target_score / 60);
     }
   }
 }
@@ -200,7 +227,6 @@ void play() {
   for(byte i = 0; i < TEAM_COUNT; i++)
   {
     teams[i].display.blinkRate(0);
-    show_time(teams[i].display, 0);
     // More LED
     for(int j = 0; j < LED_COUNT; j++)
     {
@@ -224,6 +250,11 @@ void play() {
           owner->display.setBrightness(NON_SEGMENT_BRIGHTNESS);
           owner->display.writeDisplay();
         }
+        else
+        {
+          show_time(teams[RED_TEAM].display, 0);
+          show_time(teams[BLUE_TEAM].display, 0);
+        }
         
         owner =& teams[i];
         fill_solid(&(owner->leds[0]), owner->top_led, CHSV(owner->hue, 255, 255));
@@ -241,10 +272,12 @@ void play() {
         owner->score++;
         owner->top_led = (owner->score * LED_COUNT) / target_score;
         show_time(owner->display, owner->score);
+        // Gradually speed up animation as we get close
+        led_animate.interval(ANIMATE_INTERVAL);
         int percent = owner->score * 100 / target_score;
-        if(percent > 90)
+        if(percent > 85)
         {
-          led_animate.interval(10);
+          led_animate.interval(map(percent, 85, 100, ANIMATE_INTERVAL, 5));
         }
         if(owner->score >= target_score)
         {
@@ -266,14 +299,54 @@ void win() {
     {
       teams[i].leds[j]= CHSV(owner->hue, 255,255);
       FastLED.show();
-    }
+    }    
   }
+  
+  delay(5000);
+  state = STATE_IDLE;
 }
 
 /**
  * Nothing happening, look cool
  */
 void idle() {
+  led_animate.interval(2*ANIMATE_INTERVAL);
+  for(byte i = 0; i < TEAM_COUNT; i++)
+  {
+    fill_solid(teams[i].leds, owner->top_led, CHSV(owner->hue, 255, NON_LED_BRIGHTNESS));
+    teams[i].display.setBrightness(NON_SEGMENT_BRIGHTNESS);
+    teams[i].display.writeDisplay();
+    // Need to set top LED so ripple works
+    teams[i].top_led = owner->top_led;
+  }
+  while (state == STATE_IDLE)
+  {
+    if(led_animate.check())
+    {
+      for(byte i = 0; i < TEAM_COUNT; i++)
+      {
+        teams[i].bounce.update();
+        ripple(&(teams[i]),-1, owner->hue);
+          
+        FastLED.show();
+        
+        if(teams[i].bounce.fell())
+        {
+          state = STATE_PLAY;
+        }
+      }   
+    }
+  }
+  
+  // Reset some stuff, just in case
+  for(byte i = 0; i < TEAM_COUNT; i++)
+  {
+    teams[i].score = 0;
+    teams[i].top_led = 0;
+    fill_solid(teams[i].leds, LED_COUNT, CRGB::Black);
+    show_time(teams[i].display, target_score);
+  }
+  owner = NULL;
 }
 
 /**
@@ -289,12 +362,16 @@ void show_time(Adafruit_7segment &disp, int number)
 }
 
 void ripple(struct Team *t) {
+  ripple(t, 1, t->hue);
+}
+// Direction should be 1 or -1
+void ripple(struct Team *t, int direction, int hue) {
   if(t->top_led < 3) return;
   for(byte i = 0; i < FADE_STEPS && i < t->top_led; i++)
   {
-    t->leds[wrap(t->top_led,i+led_step)] = CHSV(t->hue, 255, fade[i]);
+    t->leds[wrap(t->top_led,i+led_step)] = CHSV(hue, 255, fade[i]);
   }
-  led_step = wrap(t->top_led,led_step + 1);
+  led_step = wrap(t->top_led,led_step + direction);
 }
 int wrap(byte top_led, int step) {
   if(step < 0) return top_led + step;
